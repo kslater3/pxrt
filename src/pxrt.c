@@ -1,8 +1,36 @@
 
 #include <stdio.h>
+#include <math.h>
 
 #include "SDL2/SDL.h"
 #include "GL/gl.h"
+
+
+
+#define NES_PIXEL_WIDTH 256
+#define NES_PIXEL_HEIGHT 224
+
+const int window_width = 512;
+const int window_height = 448;
+
+float pixel_length = 2.0f;
+
+float zoom_delta = 0.25f;
+
+int mouse_x, mouse_y;
+
+float fov_nes_x = 0.0f;
+float fov_nes_y = 0.0f;
+float fov_nes_width = 256.0f;
+float fov_nes_height = 224.0f;
+
+int mouseIsDown = 0;
+
+void pixel(int, int);
+void grid();
+
+
+SDL_Window* mWindow;
 
 
 int mIsRunning = 1;
@@ -13,6 +41,7 @@ void update_scene();
 void render_scene();
 
 void print_gl_error(GLenum);
+
 
 
 int main(int argc, char **argv) {
@@ -40,12 +69,12 @@ int main(int argc, char **argv) {
 
 
     // Create an SDL Window
-	SDL_Window* mWindow = SDL_CreateWindow(
+	mWindow = SDL_CreateWindow(
 		"OpenGL SDL Window", // Window title
 		50,	// Top left x-coordinate of window
 		50,	// Top left y-coordinate of window
-		600,	// Width of window
-		600,	// Height of window
+		window_width,	// Width of window
+		window_height,	// Height of window
 		SDL_WINDOW_OPENGL	// Flags (0 for no flags set)
 	);
 
@@ -61,6 +90,9 @@ int main(int argc, char **argv) {
 		SDL_Log("Failed to create context: %s", SDL_GetError());
 		return 1;
 	}
+
+
+    glPointSize(pixel_length);
 
 
     glError = glGetError();
@@ -91,14 +123,79 @@ int main(int argc, char **argv) {
 
 void process_input() {
     SDL_Event event;
-    while (SDL_PollEvent(&event))
-    {
-        switch (event.type)
-        {
-            // If we get an SDL_QUIT event, end loop
-        case SDL_QUIT:
+    while (SDL_PollEvent(&event)) {
+        if(event.type == SDL_MOUSEWHEEL && event.wheel.windowID == SDL_GetWindowID(mWindow)) {
+            SDL_GetMouseState(&mouse_x, &mouse_y);
+
+            float mouse_nes_x = ((float) mouse_x)/((float) window_width) * fov_nes_width + fov_nes_x;
+            float mouse_nes_y = ((float) mouse_y)/((float) window_height) * fov_nes_height + fov_nes_y;
+
+            float old_pixel_length = pixel_length;
+            float translation_delta_x, translation_delta_y;
+
+            if(event.wheel.y < 0) { // Zoom Out
+                printf("Scroll Down\n");
+
+                if(pixel_length > ((float) window_width)/((float) NES_PIXEL_WIDTH)) {
+                    pixel_length = pixel_length * (1.0f - zoom_delta);
+
+                    translation_delta_x = (mouse_nes_x - 1) * old_pixel_length * zoom_delta / pixel_length;
+                    translation_delta_y = (mouse_nes_y - 1) * old_pixel_length * zoom_delta / pixel_length;
+
+                    fov_nes_x = fov_nes_x - translation_delta_x;
+                    fov_nes_y = fov_nes_y - translation_delta_y;
+
+                    fov_nes_width = window_width / pixel_length;
+                    fov_nes_height = window_height / pixel_length;
+                }
+            }else if(event.wheel.y > 0) { // Zoom In
+                printf("Scroll Up\n");
+
+                if(pixel_length < window_width/8.0f) {
+                    pixel_length = pixel_length * (1.0f + zoom_delta);
+
+                    translation_delta_x = (mouse_nes_x - 1) * old_pixel_length * zoom_delta / pixel_length;
+                    translation_delta_y = (mouse_nes_y - 1) * old_pixel_length * zoom_delta / pixel_length;
+
+                    fov_nes_x = fov_nes_x + translation_delta_x;
+                    fov_nes_y = fov_nes_y + translation_delta_y;
+
+                    fov_nes_width = window_width / pixel_length;
+                    fov_nes_height = window_height / pixel_length;
+                }
+            }
+
+            printf("Mouse X: %d, Mouse Y: %d\n", mouse_x, mouse_y);
+            printf("Pixel Length: %f\n\n", pixel_length);
+
+            glPointSize(pixel_length);
+        }else if(event.type == SDL_MOUSEBUTTONDOWN) {
+            printf("Mouse Down\n");
+
+            if(event.button.button == SDL_BUTTON_RIGHT) {
+                mouseIsDown = 1;
+                printf("Right Button\n");
+            }
+
+            printf("Mouse X: %d, Mouse Y: %d\n", event.button.x, event.button.y);
+        }else if(event.type == SDL_MOUSEBUTTONUP) {
+            printf("Mouse Up\n");
+
+            mouseIsDown = 0;
+
+            printf("Mouse X: %d, Mouse Y: %d\n", event.button.x, event.button.y);
+            printf("Window ID: %u\n\n", event.button.windowID);
+        }else if(event.type == SDL_QUIT) {
             mIsRunning = 0;
-            break;
+        }
+
+        if(event.type == SDL_MOUSEMOTION && mouseIsDown) {
+            printf("Mouse Motion, Motion X: %d, Motion Y: %d\n\n", event.motion.xrel, event.motion.yrel);
+
+            if(mouseIsDown) {
+                fov_nes_x -= event.motion.xrel/pixel_length;
+                fov_nes_y -= event.motion.yrel/pixel_length;
+            }
         }
     }
 }
@@ -110,23 +207,31 @@ void update_scene() {
 
 
 void render_scene() {
-    glClearColor(0.1f, 0.1f, 1.0f, 1.0f);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
     glClear(GL_COLOR_BUFFER_BIT);
 
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
 
-    glViewport(0, 0, 600, 600);
+    glViewport(0, 0, window_width, window_height);
 
-    glOrtho(-5.0, 5.0, -5.0, 5.0, -1.0, 1.0);
+    // Note I flip the Y Axis
+    glOrtho(0.0, window_width, window_height, 0.0, -1.0, 1.0);
 
 
-    glColor3f(1.0f, 1.0f, 1.0f);
-    glBegin(GL_LINES);
-        glVertex2d(-3.0, -3.0);
-        glVertex2d(3.0, 3.0);
-    glEnd();
+    pixel(0, 0);
+    pixel(2, 0);
+
+    pixel(2, 10);
+
+    pixel(5, 5);
+
+    pixel(128, 120);
+    pixel(170, 170);
+
+
+    grid();
 
 
     glFlush();
@@ -186,5 +291,41 @@ void print_gl_error(GLenum err) {
             printf("No Matching GL Error Enum Found");
 
             break;
+    }
+}
+
+
+
+void pixel(int x, int y) {
+    if(x >= fov_nes_x && x < fov_nes_x + fov_nes_width && y >= fov_nes_y && y < fov_nes_y + fov_nes_height) {
+        float screen_x = (x - fov_nes_x)/fov_nes_width * window_width + pixel_length/2.0f;
+        float screen_y = (y - fov_nes_y)/fov_nes_height * window_height + pixel_length/2.0f;
+
+        glColor3f(1.0f, 1.0f, 1.0f);
+        glBegin(GL_POINTS);
+            glVertex2f(screen_x, screen_y);
+        glEnd();
+    }
+}
+
+
+void grid() {
+    for(int i = 0; i < floorf(fov_nes_width); i++) {
+        float screen_x = (ceilf(fov_nes_x) + i - fov_nes_x)*pixel_length;
+        float screen_y = (ceilf(fov_nes_y) + i - fov_nes_y)*pixel_length;
+
+        glLineWidth(0.5f);
+
+        glBegin(GL_LINES);
+            glVertex2f(screen_x, 0.0f);
+            glVertex2f(screen_x, window_height);
+        glEnd();
+
+        if(i < floorf(fov_nes_height)) {
+            glBegin(GL_LINES);
+                glVertex2f(0.0f, screen_y);
+                glVertex2f(window_width, screen_y);
+            glEnd();
+        }
     }
 }
